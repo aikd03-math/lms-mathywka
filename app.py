@@ -4,7 +4,7 @@ import streamlit as st
 # ==========================================
 # 1. KONFIGURASI NAMA PORTAL & SPREADSHEET
 # ==========================================
-NAMA_PORTAL = "Portal Nilai Siswa"
+NAMA_PORTAL = "Leaderboard Math SMP YWKA Bandung"
 SPREADSHEET_ID = "1D_1VYbIu6qLTySkpPpxdNon_zmkgtY6ZMXOqK4MDGMs"
 SHEETS = ["KELAS 7", "KELAS 8", "KELAS 9"]
 
@@ -46,7 +46,6 @@ def load_all_data():
                     break
 
             if idx_header is not None:
-                # Ambil gabungan teks header jika ada gabungan sel
                 header_row_1 = [
                     str(x).strip() if pd.notna(x) else ""
                     for x in df_raw.iloc[
@@ -58,7 +57,6 @@ def load_all_data():
                     for x in df_raw.iloc[idx_header].values
                 ]
 
-                # Tentukan nama kolom terbaik
                 final_headers = []
                 for h1, h2 in zip(header_row_1, header_row_2):
                     if h2 and h2 != "nan" and not h2.startswith("Unnamed"):
@@ -96,7 +94,7 @@ def load_all_data():
 
             # Standardisasi kolom
             df = df.rename(columns={col_nis: "NIS", col_nama: "Nama"})
-            df["Kelas"] = sheet_name.title()  # e.g. Kelas 7
+            df["Kelas"] = sheet_name.title()
 
             # Pembersihan Format NIS dan Nama
             df["NIS"] = (
@@ -107,7 +105,7 @@ def load_all_data():
             )
             df["Nama"] = df["Nama"].astype(str).str.strip()
 
-            # Hapus baris data kosong atau header tersisa
+            # Hapus baris data kosong
             df = df[
                 (df["NIS"].str.len() > 0)
                 & (df["Nama"].str.len() > 0)
@@ -159,13 +157,13 @@ def load_all_data():
     return pd.DataFrame()
 
 
-# Memuat data dari Google Sheets
+# Memuat data
 df_all = load_all_data()
 
 # Konfigurasi Halaman Streamlit
-st.set_page_config(page_title=NAMA_PORTAL, page_icon="📖", layout="centered")
+st.set_page_config(page_title=NAMA_PORTAL, page_icon="📐", layout="centered")
 
-# Mengelola Session Navigasi Laman (1, 2, atau 3)
+# Managing State Navigasi Laman (1, 2, atau 3)
 if "laman" not in st.session_state:
     st.session_state.laman = 1
 if "siswa_login" not in st.session_state:
@@ -175,10 +173,10 @@ if "pilihan_ulangan" not in st.session_state:
 
 
 # ==========================================
-# LAMAN 1: LOGIN (SKETSA LAMAN 1)
+# LAMAN 1: LOGIN
 # ==========================================
 if st.session_state.laman == 1:
-    st.title(f"📖 {MATEMATIKA SMP YWKA BANDUNG}")
+    st.title(f"📐 {NAMA_PORTAL}")
     st.caption("Masukkan Nama Lengkap dan Nomor Induk (NIS) siswa")
     st.divider()
 
@@ -191,7 +189,6 @@ if st.session_state.laman == 1:
             if df_all.empty:
                 st.error("Gagal membaca data dari Google Sheets.")
             else:
-                # Mencari data siswa
                 match = df_all[
                     (df_all["NIS"].str.strip() == nis_input.strip())
                     & (
@@ -209,7 +206,7 @@ if st.session_state.laman == 1:
 
 
 # ==========================================
-# LAMAN 2: PEROLEHAN NILAI ULANGAN (SKETSA LAMAN 2)
+# LAMAN 2: PEROLEHAN NILAI ULANGAN
 # ==========================================
 elif st.session_state.laman == 2:
     siswa = st.session_state.siswa_login
@@ -221,7 +218,6 @@ elif st.session_state.laman == 2:
     )
     st.divider()
 
-    # Dapatkan daftar kolom ulangan murni + Total Rata-rata
     daftar_ulangan = [
         c
         for c in siswa.index
@@ -233,7 +229,6 @@ elif st.session_state.laman == 2:
 
     st.write("Pilih salah satu menu di bawah ini:")
 
-    # Menampilkan grid tombol secara simetris
     n_cols = min(len(daftar_ulangan), 4)
     cols = st.columns(n_cols if n_cols > 0 else 1)
 
@@ -258,7 +253,7 @@ elif st.session_state.laman == 2:
 
 
 # ==========================================
-# LAMAN 3: DETAIL NILAI & PERINGKAT (SKETSA LAMAN 3)
+# LAMAN 3: DETAIL NILAI & PERINGKAT
 # ==========================================
 elif st.session_state.laman == 3:
     siswa = st.session_state.siswa_login
@@ -276,7 +271,6 @@ elif st.session_state.laman == 3:
     st.caption(f"Laporan Evaluasi: {siswa['Nama']} ({siswa['Kelas']})")
     st.divider()
 
-    # Tampilan Kotak Nilai dan Peringkat Sesuai Sketsa
     col_nilai, col_peringkat = st.columns(2)
 
     with col_nilai:
