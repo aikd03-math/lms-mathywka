@@ -76,7 +76,7 @@ def load_all_data():
             for col in kolom_nilai:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-            # Hitung Total Rata-rata (To)
+            # Hitung Total Rata-rata (Rekapitulasi)
             if kolom_nilai:
                 df["Total_Rata"] = df[kolom_nilai].mean(axis=1).round(2)
             else:
@@ -111,7 +111,7 @@ except Exception as e:
     st.stop()
 
 # Config Halaman
-st.set_page_config(page_title="LMS Math", page_icon="📐", layout="centered")
+st.set_page_config(page_title="Mathematics Leaderboard SMP YWKA BANDUNG", page_icon="📐", layout="centered")
 
 # State Navigasi Laman (1, 2, atau 3)
 if "laman" not in st.session_state:
@@ -123,10 +123,10 @@ if "pilihan_ulangan" not in st.session_state:
 
 
 # ==========================================
-# LAMAN 1: LOGIN (LMS Math)
+# LAMAN 1: LOGIN (Mathematics Leaderboard SMP YWKA BANDUNG)
 # ==========================================
 if st.session_state.laman == 1:
-    st.title("📐 LMS Math")
+    st.title("📐 Mathematics Leaderboard SMP YWKA BANDUNG")
     st.write("---")
 
     with st.form("form_login"):
@@ -187,7 +187,7 @@ elif st.session_state.laman == 2:
         if c not in kolom_abaikan and not c.startswith("Peringkat_")
     ]
 
-    # Tampilkan tombol per ulangan + tombol Total Rata-rata (To)
+    # Tampilkan tombol per ulangan + tombol Total Rata-rata (Rekapitulasi)
     semua_tombol = daftar_ulangan + ["Total_Rata"]
     cols = st.columns(len(semua_tombol))
 
@@ -239,7 +239,7 @@ elif st.session_state.laman == 3:
             label="Peringkat",
             value=f"Peringkat {peringkat} / {total_siswa_sekelas}",
         )
-        st.caption("Se-angkatan / se-kelas")
+        st.caption("Peringkat ke- / total siswa")
 
     st.write("---")
     if st.button("⬅️ Kembali ke Perolehan Nilai"):
