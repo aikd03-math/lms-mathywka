@@ -1,3 +1,4 @@
+import csv
 import io
 import pandas as pd
 import requests
@@ -11,133 +12,137 @@ SPREADSHEET_ID = "1D_1VYbIu6qLTySkpPpxdNon_zmkgtY6ZMXOqK4MDGMs"
 SHEETS = ["KELAS 7", "KELAS 8", "KELAS 9"]
 
 
-def fetch_sheet_data(sheet_name):
-  sheet_encoded = sheet_name.replace(" ", "%20")
-  url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
-
-  # Header User-Agent agar tidak diblokir Google Server di Streamlit Cloud
+def fetch_sheet_csv(sheet_name):
+  sheet_enc = sheet_name.replace(" ", "%20")
+  urls = [
+      f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_enc}",
+      f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&sheet={sheet_enc}",
+  ]
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
       )
   }
 
-  res = requests.get(url, headers=headers, timeout=10)
-  if res.status_code != 200:
-    url_alt = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&sheet={sheet_encoded}"
-    res = requests.get(url_alt, headers=headers, timeout=10)
-
-  if res.status_code != 200:
-    raise Exception(f"HTTP Error {res.status_code}")
-
-  df_raw = pd.read_csv(
-      io.StringIO(res.text), header=None, dtype=str, on_bad_lines="skip"
-  )
-  return df_raw
-
-
-def process_all_data():
-  all_students = []
-  errors = []
-
-  for sheet in SHEETS:
+  for url in urls:
     try:
-      df_raw = fetch_sheet_data(sheet)
-      if df_raw.empty:
-        continue
+      resp = requests.get(url, headers=headers, timeout=10)
+      if resp.status_code == 200 and len(resp.text) > 50:
+        return resp.text
+    except Exception:
+      pass
+  return None
 
-      # Ekstrak judul ulangan dari baris header (kolom F / indeks 5 ke atas)
-      ulangan_headers = {}
-      for col_idx in range(5, df_raw.shape[1]):
-        header_name = f"Ulangan {col_idx - 4}"
-        for row_idx in range(min(5, len(df_raw))):
-          val = str(df_raw.iloc[row_idx, col_idx]).strip()
-          if (
-              val
-              and val.lower() != "nan"
-              and "pertemuan" not in val.lower()
-              and "unnamed" not in val.lower()
-          ):
-            header_name = val
-            break
-        ulangan_headers[col_idx] = header_name
 
-      # Ekstrak data siswa (Induk di kolom indeks 1, Nama di kolom indeks 3)
-      rows_list = []
-      for _, row in df_raw.iterrows():
-        if len(row) > 3:
-          val_nis = str(row[1]).strip() if pd.notna(row[1]) else ""
-          val_nama = str(row[3]).strip() if pd.notna(row[3]) else ""
+def parse_smart_data(csv_text, sheet_label):
+  reader = csv.reader(io.StringIO(csv_text))
+  rows = list(reader)
+  if not rows:
+    return []
 
-          # Cek baris siswa valid (NIS berupa angka minimal 5 digit)
-          if val_nis.isdigit() and len(val_nis) >= 5 and val_nama:
-            student_data = {
-                "NIS": val_nis,
-                "Nama": val_nama,
-                "Kelas": sheet.title(),
-            }
+  # Detect Header/Score Columns
+  score_cols = {}
+  for r_idx in range(min(5, len(rows))):
+    row = rows[r_idx]
+    for c_idx, cell in enumerate(row):
+      c_text = cell.strip()
+      if c_text and not any(
+          x in c_text.lower()
+          for x in ["nama", "l/p"]
+      ):
+        score_cols[c_idx] = c_text
 
-            for col_idx, u_title in ulangan_headers.items():
-              if col_idx < len(row):
-                score_str = (
-                    str(row[col_idx])
-                    .strip()
-                    .replace(",", ".")
-                    .replace("-", "0")
-                )
-                try:
-                  student_data[u_title] = float(score_str)
-                except ValueError:
-                  student_data[u_title] = 0.0
-              else:
-                student_data[u_title] = 0.0
+  if not score_cols:
+    score_cols = {5: "Diagnostik"}
 
-            rows_list.append(student_data)
+  students = []
+  for row in rows:
+    if len(row) < 4:
+      continue
 
-      if rows_list:
-        df_sheet = pd.DataFrame(rows_list)
-        all_students.append(df_sheet)
+    nis = None
+    nama = None
 
-    except Exception as e:
-      errors.append(f"Tab {sheet}: {str(e)}")
+    # Smart Search NIS & Nama
+    for cell in row:
+      val = cell.strip()
+      # NIS : Angka murni panjang 6 - 12 digit
+      if not nis and val.isdigit() and 6 <= len(val) <= 12:
+        nis = val
+      # Nama : Teks selain header/kata kunci
+      elif (
+          val
+          and not val.isdigit()
+          and len(val) > 3
+          and not nama
+          and not any(
+              x in val.lower()
+              for x in [
+                  "Nama Siswa",
+                  "L/P",
+              ]
+          )
+      ):
+        nama = val
 
-  if all_students:
-    df_combined = pd.concat(all_students, ignore_index=True)
+    if nis and nama:
+      st_item = {"NIS": nis, "Nama": nama, "Kelas": sheet_label}
 
-    kolom_ulangan = [
-        c for c in df_combined.columns if c not in ["NIS", "Nama", "Kelas"]
-    ]
+      for c_idx, s_name in score_cols.items():
+        val_score = 0.0
+        if c_idx < len(row):
+          raw_val = row[c_idx].strip().replace(",", ".").replace("-", "0")
+          try:
+            val_score = float(raw_val)
+          except ValueError:
+            val_score = 0.0
+        st_item[s_name] = val_score
 
-    if kolom_ulangan:
-      df_combined["Total_Rata"] = (
-          df_combined[kolom_ulangan].mean(axis=1).round(1)
-      )
+      students.append(st_item)
 
-      for c in kolom_ulangan:
-        df_combined[f"Peringkat_{c}"] = (
-            df_combined.groupby("Kelas")[c]
-            .rank(ascending=False, method="min")
-            .astype(int)
-        )
+  return students
 
-      df_combined["Peringkat_Total_Rata"] = (
-          df_combined.groupby("Kelas")["Total_Rata"]
+
+@st.cache_data(ttl=30)
+def load_all_students():
+  combined_list = []
+  for sheet in SHEETS:
+    csv_raw = fetch_sheet_csv(sheet)
+    if csv_raw:
+      parsed = parse_smart_data(csv_raw, sheet.title())
+      combined_list.extend(parsed)
+
+  if not combined_list:
+    return pd.DataFrame()
+
+  df = pd.DataFrame(combined_list)
+  score_cols = [c for c in df.columns if c not in ["NIS", "Nama", "Kelas"]]
+
+  if score_cols:
+    df["Total_Rata"] = df[score_cols].mean(axis=1).round(1)
+
+    for c in score_cols:
+      df[f"Peringkat_{c}"] = (
+          df.groupby("Kelas")[c]
           .rank(ascending=False, method="min")
           .astype(int)
       )
 
-    return df_combined, errors
+    df["Peringkat_Total_Rata"] = (
+        df.groupby("Kelas")["Total_Rata"]
+        .rank(ascending=False, method="min")
+        .astype(int)
+    )
 
-  return pd.DataFrame(), errors
+  return df
 
 
-# Load Data dari Google Sheets
-df_all, fetch_errors = process_all_data()
+# Load Master Data
+df_all = load_all_students()
 
-# Konfigurasi Tampilan
+# Config UI
 st.set_page_config(page_title=NAMA_PORTAL, page_icon="📐", layout="centered")
 
-# Managing State Navigasi Laman (1, 2, atau 3)
 if "laman" not in st.session_state:
   st.session_state.laman = 1
 if "siswa_login" not in st.session_state:
@@ -147,7 +152,7 @@ if "pilihan_ulangan" not in st.session_state:
 
 
 # ==========================================
-# LAMAN 1: LOGIN
+# LAMAN 1: LOGIN (LMS Math)
 # ==========================================
 if st.session_state.laman == 1:
   st.title(f"📐 {NAMA_PORTAL}")
@@ -162,8 +167,8 @@ if st.session_state.laman == 1:
     if submit:
       if df_all.empty:
         st.error(
-            "Gagal membaca data dari Google Sheets. Detail error:\n"
-            + "\n".join(fetch_errors)
+            "⚠️ Gagal terhubung ke Google Sheets!\n\nPastikan di Google Sheets"
+            " Anda sudah klik: **File > Bagikan > Publikasikan ke Web**."
         )
       else:
         nis_clean = nis_input.strip()
