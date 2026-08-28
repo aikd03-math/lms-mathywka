@@ -1,6 +1,11 @@
 import pandas as pd
 import streamlit as st
-
+st.markdown(
+    """
+    <meta property="og:title" content="Mathematics Leaderboard SMP YWKA Bandung">
+    <meta property="og:description" content="Portal perolehan nilai ulangan dan peringkat matematika siswa SMP YWKA Bandung.">
+    """,
+    unsafe_allow_html=True,
 # ==========================================
 # 1. KONEKSI SPREADSHEET 3 KELAS
 # ==========================================
