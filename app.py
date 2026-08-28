@@ -1,82 +1,136 @@
+import re
 import pandas as pd
 import streamlit as st
 
 # ==========================================
-# 1. KONFIGURASI PORTAL & SPREADSHEET
+# 1. KONFIGURASI SPREADSHEET
 # ==========================================
 NAMA_PORTAL = "Leaderboard Math SMP YWKA Bandung"
 SPREADSHEET_ID = "1D_1VYbIu6qLTySkpPpxdNon_zmkgtY6ZMXOqK4MDGMs"
 SHEETS = ["KELAS 7", "KELAS 8", "KELAS 9"]
 
 
+@st.cache_data(ttl=30)
 def load_all_data():
     all_students = []
-    error_messages = []
 
     for sheet_name in SHEETS:
-        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name.replace(' ', '%20')}"
+        # Menggunakan format URL ekspor CSV resmi dari Google Sheets
+        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&sheet={sheet_name.replace(' ', '%20')}"
+
         try:
-            # Baca CSV tanpa header otomatis
             df_raw = pd.read_csv(url, header=None, dtype=str)
 
             if df_raw.empty or df_raw.shape[1] < 4:
                 continue
 
-            # 1. Identifikasi Nama Kolom Ulangan (Kolom F / indeks 5 ke atas)
-            nama_ulangan_cols = {}
-            for col_idx in range(5, df_raw.shape[1]):
-                header_texts = []
-                for row_idx in range(min(3, len(df_raw))):
-                    val = str(df_raw.iloc[row_idx, col_idx]).strip()
-                    if (
-                        val
-                        and val != "nan"
-                        and "Pertemuan" not in val
-                        and "Unnamed" not in val
-                    ):
-                        header_texts.append(val)
+            # Cari baris tempat header utama (Induk / NISN / Nama) berada
+            header_idx = None
+            for idx, row in df_raw.iterrows():
+                row_str = " ".join([str(x) for x in row.values if pd.notna(x)])
+                if (
+                    "Induk" in row_str
+                    or "NISN" in row_str
+                    or "Nama" in row_str
+                ):
+                    header_idx = idx
+                    break
 
-                if header_texts:
-                    nama_ulangan_cols[col_idx] = header_texts[-1]
-                else:
-                    nama_ulangan_cols[col_idx] = f"Ulangan_{col_idx-4}"
+            if header_idx is None:
+                continue
 
-            # 2. Ambil Data Siswa (NIS di Kolom Index 1 & Nama di Kolom Index 3)
-            rows_data = []
-            for _, row in df_raw.iterrows():
-                val_nis = str(row[1]).strip() if pd.notna(row[1]) else ""
-                val_nama = str(row[3]).strip() if pd.notna(row[3]) else ""
+            # Ambil data setelah baris header
+            df_data = df_raw.iloc[header_idx + 1 :].copy()
+            headers = [
+                str(h).strip() if pd.notna(h) else ""
+                for h in df_raw.iloc[header_idx].values
+            ]
 
-                # Filter baris siswa valid (NIS angka & Nama ada)
-                if val_nis.isdigit() and len(val_nis) >= 5 and val_nama:
-                    student_dict = {
-                        "NIS": val_nis,
-                        "Nama": val_nama,
+            # Cari indeks kolom NIS (Induk/NISN) dan Nama
+            nis_col_idx = None
+            nama_col_idx = None
+
+            for i, h in enumerate(headers):
+                if any(k in h for k in ["Induk", "NIS", "NISN"]) and (
+                    nis_col_idx is None
+                ):
+                    nis_col_idx = i
+                elif "Nama" in h and (nama_col_idx is None):
+                    nama_col_idx = i
+
+            # Jika tidak terdeteksi via header, gunakan standar posisi kolom (Col 1: NIS, Col 3: Nama)
+            if nis_col_idx is None:
+                nis_col_idx = 1
+            if nama_col_idx is None:
+                nama_col_idx = 3
+
+            # Ambil daftar kolom ulangan (mulai dari kolom setelah nama)
+            ulangan_cols = {}
+            for i in range(nama_col_idx + 1, df_raw.shape[1]):
+                col_name = headers[i] if i < len(headers) else ""
+                if not col_name or col_name == "nan" or "L/P" in col_name:
+                    # Cek header baris di atasnya jika merged cells
+                    upper_val = (
+                        str(df_raw.iloc[header_idx - 1, i]).strip()
+                        if header_idx > 0
+                        else ""
+                    )
+                    if upper_val and upper_val != "nan":
+                        col_name = upper_val
+                    else:
+                        col_name = f"Ulangan_{i - nama_col_idx}"
+
+                if "Pertemuan" not in col_name and "L/P" not in col_name:
+                    ulangan_cols[i] = col_name
+
+            # Olah data per siswa
+            rows_list = []
+            for _, row in df_data.iterrows():
+                raw_nis = (
+                    str(row[nis_col_idx]).strip()
+                    if pd.notna(row[nis_col_idx])
+                    else ""
+                )
+                raw_nama = (
+                    str(row[nama_col_idx]).strip()
+                    if pd.notna(row[nama_col_idx])
+                    else ""
+                )
+
+                # Bersihkan NIS dari format desimal
+                clean_nis = re.sub(r"\.0$", "", raw_nis)
+
+                if (
+                    clean_nis
+                    and clean_nis != "nan"
+                    and raw_nama
+                    and raw_nama != "nan"
+                ):
+                    student_data = {
+                        "NIS": clean_nis,
+                        "Nama": raw_nama,
                         "Kelas": sheet_name.title(),
                     }
 
-                    for col_idx, u_name in nama_ulangan_cols.items():
-                        if col_idx < len(row):
-                            val_score = str(row[col_idx]).strip()
-                            try:
-                                student_dict[u_name] = float(val_score)
-                            except ValueError:
-                                student_dict[u_name] = 0.0
-                        else:
-                            student_dict[u_name] = 0.0
+                    for col_i, u_name in ulangan_cols.items():
+                        score_val = (
+                            str(row[col_i]).strip()
+                            if col_i < len(row) and pd.notna(row[col_i])
+                            else "0"
+                        )
+                        try:
+                            student_data[u_name] = float(score_val)
+                        except ValueError:
+                            student_data[u_name] = 0.0
 
-                    rows_data.append(student_dict)
+                    rows_list.append(student_data)
 
-            if rows_data:
-                df_sheet = pd.DataFrame(rows_data)
+            if rows_list:
+                df_sheet = pd.DataFrame(rows_list)
                 all_students.append(df_sheet)
 
-        except Exception as e:
-            error_messages.append(f"Gagal membaca tab {sheet_name}: {e}")
-
-    if error_messages:
-        for err in error_messages:
-            st.warning(err)
+        except Exception:
+            continue
 
     if all_students:
         df_combined = pd.concat(all_students, ignore_index=True)
@@ -88,7 +142,7 @@ def load_all_data():
         ]
 
         if kolom_ulangan:
-            # Hitung Total Rata-Rata (To)
+            # Hitung Total Rata-Rata
             df_combined["Total_Rata"] = (
                 df_combined[kolom_ulangan].mean(axis=1).round(1)
             )
@@ -112,13 +166,13 @@ def load_all_data():
     return pd.DataFrame()
 
 
-# Memuat data tanpa caching sementara agar data langsung terbarui
+# Memuat Data
 df_all = load_all_data()
 
 # Konfigurasi Tampilan
 st.set_page_config(page_title=NAMA_PORTAL, page_icon="📐", layout="centered")
 
-# Management Navigasi Laman (1, 2, atau 3)
+# State Navigasi
 if "laman" not in st.session_state:
     st.session_state.laman = 1
 if "siswa_login" not in st.session_state:
