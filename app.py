@@ -8,21 +8,6 @@ NAMA_PORTAL = "Leaderboard Math SMP YWKA Bandung"
 SPREADSHEET_ID = "1D_1VYbIu6qLTySkpPpxdNon_zmkgtY6ZMXOqK4MDGMs"
 SHEETS = ["KELAS 7", "KELAS 8", "KELAS 9"]
 
-# Daftar nama kolom non-ulangan yang disaring dari tombol
-KOLOM_NON_ULANGAN = [
-    "Urt.",
-    "Nomor",
-    "Induk",
-    "NISN",
-    "Nama",
-    "Nama Siswa",
-    "L/P",
-    "Kelas",
-    "Total_Rata",
-    "Pertemuan ke …….",
-    "Pertemuan ke .......",
-]
-
 
 @st.cache_data(ttl=60)
 def load_all_data():
@@ -31,124 +16,99 @@ def load_all_data():
     for sheet_name in SHEETS:
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name.replace(' ', '%20')}"
         try:
+            # Baca CSV tanpa baris header
             df_raw = pd.read_csv(url, header=None)
 
-            # Cari baris yang memuat nama kolom utama
-            idx_header = None
+            # Cari baris pertama tempat data siswa dimulai (misal Induk bernilai angka 9 digit)
+            data_start_idx = None
             for idx, row in df_raw.iterrows():
-                row_items = [str(x).strip() for x in row.values]
-                if (
-                    "Induk" in row_items
-                    or "NISN" in row_items
-                    or "Nama Siswa" in row_items
-                ):
-                    idx_header = idx
+                val_col1 = str(row[1]).strip()
+                if val_col1.isdigit() and len(val_col1) >= 6:
+                    data_start_idx = idx
                     break
 
-            if idx_header is not None:
-                header_row_1 = [
-                    str(x).strip() if pd.notna(x) else ""
-                    for x in df_raw.iloc[
-                        idx_header - 1 if idx_header > 0 else idx_header
-                    ].values
-                ]
-                header_row_2 = [
-                    str(x).strip() if pd.notna(x) else ""
-                    for x in df_raw.iloc[idx_header].values
-                ]
-
-                final_headers = []
-                for h1, h2 in zip(header_row_1, header_row_2):
-                    if h2 and h2 != "nan" and not h2.startswith("Unnamed"):
-                        final_headers.append(h2)
-                    elif h1 and h1 != "nan" and not h1.startswith("Unnamed"):
-                        final_headers.append(h1)
-                    else:
-                        final_headers.append("Unknown")
-
-                df = df_raw.iloc[idx_header + 1 :].copy()
-                df.columns = final_headers
-            else:
-                df = df_raw.copy()
-
-            # Deteksi Kolom Induk/NIS dan Nama Siswa
-            col_nis = next(
-                (
-                    c
-                    for c in df.columns
-                    if "Induk" in str(c) or "NIS" in str(c) or "NISN" in str(c)
-                ),
-                None,
-            )
-            col_nama = next(
-                (
-                    c
-                    for c in df.columns
-                    if "Nama" in str(c) or "Siswa" in str(c)
-                ),
-                None,
-            )
-
-            if not col_nis or not col_nama:
+            if data_start_idx is None:
                 continue
 
-            # Standardisasi kolom
-            df = df.rename(columns={col_nis: "NIS", col_nama: "Nama"})
-            df["Kelas"] = sheet_name.title()
+            # Ambil baris header di atas data siswa untuk mengambil judul ulangan
+            header_rows = df_raw.iloc[:data_start_idx]
 
-            # Pembersihan Format NIS dan Nama
-            df["NIS"] = (
-                df["NIS"]
+            # Pemetaan kolom berdasarkan posisi indeks
+            col_names = []
+            for c_idx in range(df_raw.shape[1]):
+                if c_idx == 1:
+                    col_names.append("NIS")
+                elif c_idx == 3:
+                    col_names.append("Nama")
+                elif c_idx >= 5:
+                    # Ambil nama ulangan dari baris header di kolom ini
+                    h_vals = [
+                        str(v).strip()
+                        for v in header_rows[c_idx].values
+                        if pd.notna(v)
+                        and str(v).strip() != ""
+                        and "Pertemuan" not in str(v)
+                        and "Unnamed" not in str(v)
+                        and "nan" not in str(v)
+                    ]
+                    if h_vals:
+                        col_names.append(h_vals[-1])
+                    else:
+                        col_names.append(f"Ulangan_{c_idx-4}")
+                else:
+                    col_names.append(f"Ignored_{c_idx}")
+
+            # Ambil hanya baris data siswa
+            df_data = df_raw.iloc[data_start_idx:].copy()
+            df_data.columns = col_names
+            df_data["Kelas"] = sheet_name.title()
+
+            # Pembersihan Format NIS & Nama
+            df_data["NIS"] = (
+                df_data["NIS"]
                 .astype(str)
                 .str.replace(".0", "", regex=False)
                 .str.strip()
             )
-            df["Nama"] = df["Nama"].astype(str).str.strip()
+            df_data["Nama"] = df_data["Nama"].astype(str).str.strip()
 
-            # Hapus baris data kosong
-            df = df[
-                (df["NIS"].str.len() > 0)
-                & (df["Nama"].str.len() > 0)
-                & (df["NIS"] != "nan")
-                & (df["Nama"] != "nan")
-                & (df["NIS"] != "Induk")
+            # Filter daftar kolom ulangan murni
+            kolom_nilai = [
+                c
+                for c in col_names
+                if c not in ["NIS", "Nama", "Kelas"]
+                and not c.startswith("Ignored_")
             ]
 
-            # Identifikasi kolom ulangan/nilai murni
-            kolom_nilai = []
-            for col in df.columns:
-                c_str = str(col).strip()
-                if (
-                    c_str not in KOLOM_NON_ULANGAN
-                    and not c_str.startswith("Unnamed")
-                    and "Pertemuan" not in c_str
-                    and c_str != "Unknown"
-                ):
-                    kolom_nilai.append(col)
-
-            # Konversi nilai ke tipe numerik
+            # Konversi nilai ke angka
             for col in kolom_nilai:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+                df_data[col] = pd.to_numeric(
+                    df_data[col], errors="coerce"
+                ).fillna(0)
 
             # Hitung Total Rata-Rata (To)
             if kolom_nilai:
-                df["Total_Rata"] = df[kolom_nilai].mean(axis=1).round(1)
+                df_data["Total_Rata"] = df_data[kolom_nilai].mean(
+                    axis=1
+                ).round(1)
             else:
-                df["Total_Rata"] = 0.0
+                df_data["Total_Rata"] = 0.0
 
             # Hitung Peringkat se-kelas
             for col in kolom_nilai:
-                df[f"Peringkat_{col}"] = (
-                    df[col].rank(ascending=False, method="min").astype(int)
+                df_data[f"Peringkat_{col}"] = (
+                    df_data[col]
+                    .rank(ascending=False, method="min")
+                    .astype(int)
                 )
 
-            df["Peringkat_Total_Rata"] = (
-                df["Total_Rata"]
+            df_data["Peringkat_Total_Rata"] = (
+                df_data["Total_Rata"]
                 .rank(ascending=False, method="min")
                 .astype(int)
             )
 
-            all_students.append(df)
+            all_students.append(df_data)
         except Exception:
             continue
 
@@ -157,10 +117,10 @@ def load_all_data():
     return pd.DataFrame()
 
 
-# Memuat data
+# Load Data
 df_all = load_all_data()
 
-# Konfigurasi Halaman Streamlit
+# Konfigurasi Tampilan
 st.set_page_config(page_title=NAMA_PORTAL, page_icon="📐", layout="centered")
 
 # Managing State Navigasi Laman (1, 2, atau 3)
@@ -176,7 +136,7 @@ if "pilihan_ulangan" not in st.session_state:
 # LAMAN 1: LOGIN
 # ==========================================
 if st.session_state.laman == 1:
-    st.title(f"📐 {NAMA_PORTAL}")
+    st.title(f"📐 Mathematics Leaderboard SMP YWKA Bandung")
     st.caption("Masukkan Nama Lengkap dan Nomor Induk (NIS) siswa")
     st.divider()
 
@@ -187,7 +147,10 @@ if st.session_state.laman == 1:
 
         if submit:
             if df_all.empty:
-                st.error("Gagal membaca data dari Google Sheets.")
+                st.error(
+                    "Gagal membaca data dari Google Sheets. Pastikan akses"
+                    " berbagi sudah diset ke 'Siapa saja yang memiliki link'."
+                )
             else:
                 match = df_all[
                     (df_all["NIS"].str.strip() == nis_input.strip())
@@ -202,7 +165,7 @@ if st.session_state.laman == 1:
                     st.session_state.laman = 2
                     st.rerun()
                 else:
-                    st.error("Nama atau Nomor Induk tidak cocok/ditemukan!")
+                    st.error("Nama atau Nomor Induk tidak cocok / ditemukan!")
 
 
 # ==========================================
@@ -218,13 +181,13 @@ elif st.session_state.laman == 2:
     )
     st.divider()
 
+    # Dapatkan daftar kolom ulangan + Total Rata-rata
     daftar_ulangan = [
         c
         for c in siswa.index
-        if c not in KOLOM_NON_ULANGAN
+        if c not in ["NIS", "Nama", "Kelas"]
+        and not str(c).startswith("Ignored_")
         and not str(c).startswith("Peringkat_")
-        and not str(c).startswith("Unnamed")
-        and "Pertemuan" not in str(c)
     ]
 
     st.write("Pilih salah satu menu di bawah ini:")
