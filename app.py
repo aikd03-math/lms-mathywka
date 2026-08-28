@@ -48,7 +48,7 @@ def parse_smart_data(csv_text, sheet_label):
       c_text = cell.strip()
       if c_text and not any(
           x in c_text.lower()
-          for x in ["nama", "l/p"]
+          for x in ["urt", "nomor", "induk", "nisn", "nama", "l/p", "pertemuan"]
       ):
         score_cols[c_idx] = c_text
 
@@ -78,8 +78,14 @@ def parse_smart_data(csv_text, sheet_label):
           and not any(
               x in val.lower()
               for x in [
-                  "Nama Siswa",
-                  "L/P",
+                  "kelas",
+                  "pertemuan",
+                  "nomor",
+                  "induk",
+                  "nisn",
+                  "diagnostik",
+                  "urt",
+                  "l/p",
               ]
           )
       ):
